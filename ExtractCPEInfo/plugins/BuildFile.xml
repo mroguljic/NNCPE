@@ -12,7 +12,7 @@
 <else/>
   <set name="cuda_src" value=""/>
 </iftool>
-<library file="*.cpp" name="testPPlugins">
+<library file="*.cpp" name="ExtractCPEInfo">
   <use name="CUDADataFormats/BeamSpot"/>
   <use name="CUDADataFormats/TrackingRecHit"/>
   <use name="HeterogeneousCore/CUDACore"/>
