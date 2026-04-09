@@ -5,18 +5,13 @@
 To produce an output TTree with this EDAnalyzer, run the following steps:
 
 ```
-cmsrel CMSSW_14_0_1 
-cd CMSSW_14_0_1/
+export SCRAM_ARCH=el9_amd64_gcc12
+cmsrel CMSSW_16_1_0_pre4 
+cd CMSSW_16_1_0_pre4/
 cd src/
 cmsenv
-git cms-addpkg RecoLocalTracker/SiPixelRecHits
-git cms-addpkg RecoLocalTracker/Records
-git cms-addpkg RecoTracker/TransientTrackingRecHit
-git clone https://github.com/CMSTrackerDPG/SiPixelTools-PixelTrees.git SiPixelTools/PixelTrees
-scram b -j
 git clone https://github.com/ammitra/NNCPE.git
-cd NNCPE/ExtractCPEInfo
-scram b -j
-cd python
+scram b -j 4
+cd NNCPE/ExtractCPEInfo/python
 cmsRun ConfFile_cfg.py
 ```
