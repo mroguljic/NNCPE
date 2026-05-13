@@ -87,12 +87,20 @@ process.ExtractCPEInfo = cms.EDAnalyzer('ExtractCPEInfo',
     'TrackerHitsPixelEndcapLowTof', 
  )
 )
+
+
+
+#Customization, if we want to use Generic CPE instead of Template CPE
+#process.TTRHBuilderAngleAndTemplate.PixelCPE = 'PixelCPEGeneric'
+#process.TTRHBuilderAngleAndTemplateWithoutProbQ.PixelCPE = 'PixelCPEGeneric'
+
 # define what to run in the path
 process.raw2digi_step = cms.Path(process.RawToDigi)   
 process.L1Reco_step = cms.Path(process.L1Reco)
 process.reconstruction_step = cms.Path(process.reconstruction_trackingOnly)
 process.endjob_step = cms.EndPath(process.endOfProcess)
 #process.siPixelClusters_step = process.siPixelClusters
+
 
 process.ExtractCPEInfo_step = cms.Path(process.ExtractCPEInfo)
 
@@ -102,6 +110,7 @@ process.ExtractCPEInfo_step = cms.Path(process.ExtractCPEInfo)
 #  process.siPixelClusters_step,
 #  process.pixelCPECNN_step
 #)
+
 
 # for the track angle approach
 process.schedule = cms.Schedule(
