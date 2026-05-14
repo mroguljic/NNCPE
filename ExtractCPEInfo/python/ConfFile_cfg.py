@@ -79,6 +79,10 @@ process.ExtractCPEInfo = cms.EDAnalyzer('ExtractCPEInfo',
  associateRecoTracks = cms.bool(False),
  associateStrip = cms.bool(False),
  associatePixel = cms.bool(True),
+ useGenericCPE = cms.bool(True),
+ useTemplateCPE = cms.bool(True),
+ genericCPE = cms.ESInputTag("", "PixelCPEGeneric"),
+ templateCPE = cms.ESInputTag("", "PixelCPEClusterRepair"),
  pixelSimLinkSrc = cms.string("simSiPixelDigis"),
  stripSimLinkSrc = cms.string("simSiStripDigis"),
  ROUList = cms.vstring(
@@ -90,7 +94,7 @@ process.ExtractCPEInfo = cms.EDAnalyzer('ExtractCPEInfo',
 
 
 
-#Customization, if we want to use Generic CPE instead of Template CPE
+#Customization, if we want to use Generic CPE instead of Template CPE in track refitting
 #process.TTRHBuilderAngleAndTemplate.PixelCPE = 'PixelCPEGeneric'
 #process.TTRHBuilderAngleAndTemplateWithoutProbQ.PixelCPE = 'PixelCPEGeneric'
 

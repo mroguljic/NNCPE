@@ -16,6 +16,8 @@
 #include <sstream>
 #include <fstream>
 #include <sys/time.h>
+#include <limits>
+#include <tuple>
 
 #include <TF1.h>
 #include "Math/MinimizerOptions.h"
@@ -54,6 +56,7 @@
 #include "DataFormats/VertexReco/interface/Vertex.h"
 #include "DataFormats/TrackReco/interface/TrackFwd.h"
 #include "DataFormats/VertexReco/interface/VertexFwd.h"
+#include "RecoLocalTracker/ClusterParameterEstimator/interface/PixelClusterParameterEstimator.h"
 
 #include "Geometry/TrackerGeometryBuilder/interface/TrackerGeometry.h"
 #include "Geometry/Records/interface/TrackerDigiGeometryRecord.h"
@@ -76,6 +79,7 @@
 #include "TrackingTools/TransientTrack/interface/TransientTrack.h"
 #include "TrackingTools/PatternTools/interface/TrajTrackAssociation.h"
 #include "TrackingTools/TrackAssociator/interface/TrackAssociatorParameters.h"
+#include "RecoLocalTracker/Records/interface/TkPixelCPERecord.h"
 //#include "TrackingTools/TrackAssociator/interface/TrackDetectorAssociator.h"
 
 #include "DataFormats/SiPixelDetId/interface/PXBDetId.h"
@@ -169,11 +173,27 @@ private:
     float Generic_dy[SIMHITPERCLMAX];
     float Generic_dyPull[SIMHITPERCLMAX];
 
+    float Template_x;
+    float Template_y;
+    float Template_xError;
+    float Template_yError;
+    float Template_dx[SIMHITPERCLMAX];
+    float Template_dxPull[SIMHITPERCLMAX];
+    float Template_dy[SIMHITPERCLMAX];
+    float Template_dyPull[SIMHITPERCLMAX];
+
     edm::InputTag fTrackCollectionLabel;
     int count=0;
 
+    bool useGenericCPE_;
+    bool useTemplateCPE_;
+    edm::ESInputTag genericCPELabel_;
+    edm::ESInputTag templateCPELabel_;
+
     edm::EDGetTokenT<std::vector<reco::Track>> TrackToken;
     edm::ESGetToken<TrackerTopology, TrackerTopologyRcd> TrackerTopoToken;
+    edm::ESGetToken<PixelClusterParameterEstimator, TkPixelCPERecord> GenericCPEToken;
+    edm::ESGetToken<PixelClusterParameterEstimator, TkPixelCPERecord> TemplateCPEToken;
     TrackerHitAssociator::Config trackerHitAssociatorConfig_;
 };
 
@@ -197,6 +217,10 @@ void ExtractCPEInfo::fillDescriptions(edm::ConfigurationDescriptions& descriptio
     desc.add<std::vector<std::string>>("ROUList");
     desc.add<bool>("associatePixel");
     desc.add<bool>("associateStrip");
+    desc.add<bool>("useGenericCPE", true);
+    desc.add<bool>("useTemplateCPE", false);
+    desc.add<edm::ESInputTag>("genericCPE", edm::ESInputTag("", "PixelCPEGeneric"));
+    desc.add<edm::ESInputTag>("templateCPE", edm::ESInputTag("", "PixelCPEClusterRepair"));
     descriptions.addWithDefaultLabel(desc);
 }
 
@@ -239,6 +263,10 @@ void ExtractCPEInfo::ResetVars(){
     Generic_y = 0.f;
     Generic_xError = 0.f;
     Generic_yError = 0.f;
+    Template_x = 0.f;
+    Template_y = 0.f;
+    Template_xError = 0.f;
+    Template_yError = 0.f;
 
     for(int i = 0; i < TXSIZE; i++){ 
         Cluster_xRaw[i] = 0.f;
@@ -260,6 +288,10 @@ void ExtractCPEInfo::ResetVars(){
         Generic_dxPull[i] = std::numeric_limits<float>::max();
         Generic_dy[i] = std::numeric_limits<float>::max();
         Generic_dyPull[i] = std::numeric_limits<float>::max();
+        Template_dx[i] = std::numeric_limits<float>::max();
+        Template_dxPull[i] = std::numeric_limits<float>::max();
+        Template_dy[i] = std::numeric_limits<float>::max();
+        Template_dyPull[i] = std::numeric_limits<float>::max();
     }
 
 }
@@ -267,8 +299,25 @@ void ExtractCPEInfo::ResetVars(){
 ExtractCPEInfo::ExtractCPEInfo(const edm::ParameterSet& config, const CacheData* cacheData)
 :fname(config.getParameter<std::string>("fname")),fTrackCollectionLabel(config.getUntrackedParameter<InputTag>("trackCollectionLabel", edm::InputTag("generalTracks"))),
 trackerHitAssociatorConfig_(config, consumesCollector()) {
+    useGenericCPE_ = config.getParameter<bool>("useGenericCPE");
+    useTemplateCPE_ = config.getParameter<bool>("useTemplateCPE");
+    genericCPELabel_ = config.getParameter<edm::ESInputTag>("genericCPE");
+    templateCPELabel_ = config.getParameter<edm::ESInputTag>("templateCPE");
+
+    if (!useGenericCPE_ && !useTemplateCPE_) {
+        throw cms::Exception("Configuration")
+            << "ExtractCPEInfo requires at least one CPE enabled. "
+            << "Set useGenericCPE=True and/or useTemplateCPE=True.";
+    }
+
     TrackToken              = consumes <std::vector<reco::Track>>(fTrackCollectionLabel) ;
     TrackerTopoToken        = esConsumes <TrackerTopology, TrackerTopologyRcd>();
+    if (useGenericCPE_) {
+        GenericCPEToken = esConsumes(genericCPELabel_);
+    }
+    if (useTemplateCPE_) {
+        TemplateCPEToken = esConsumes(templateCPELabel_);
+    }
     ResetVars();
 
     count = 0;
@@ -309,6 +358,11 @@ trackerHitAssociatorConfig_(config, consumesCollector()) {
     out_Tree->Branch("Generic_xError", &Generic_xError, "Generic_xError/F");
     out_Tree->Branch("Generic_yError", &Generic_yError, "Generic_yError/F");
 
+    out_Tree->Branch("Template_x", &Template_x, "Template_x/F");
+    out_Tree->Branch("Template_y", &Template_y, "Template_y/F");
+    out_Tree->Branch("Template_xError", &Template_xError, "Template_xError/F");
+    out_Tree->Branch("Template_yError", &Template_yError, "Template_yError/F");
+
     out_Tree->Branch("nSimHit", &nSimHit, "nSimHit/I");
     out_Tree->Branch("SimHit_x", &SimHit_x, "SimHit_x[nSimHit]/F");
     out_Tree->Branch("SimHit_y", &SimHit_y, "SimHit_y[nSimHit]/F");
@@ -316,6 +370,10 @@ trackerHitAssociatorConfig_(config, consumesCollector()) {
     out_Tree->Branch("Generic_dy", &Generic_dy, "Generic_dy[nSimHit]/F");
     out_Tree->Branch("Generic_dxPull", &Generic_dxPull, "Generic_dxPull[nSimHit]/F");
     out_Tree->Branch("Generic_dyPull", &Generic_dyPull, "Generic_dyPull[nSimHit]/F");
+    out_Tree->Branch("Template_dx", &Template_dx, "Template_dx[nSimHit]/F");
+    out_Tree->Branch("Template_dy", &Template_dy, "Template_dy[nSimHit]/F");
+    out_Tree->Branch("Template_dxPull", &Template_dxPull, "Template_dxPull[nSimHit]/F");
+    out_Tree->Branch("Template_dyPull", &Template_dyPull, "Template_dyPull[nSimHit]/F");
 }
 
 
@@ -332,7 +390,6 @@ void ExtractCPEInfo::endRun(edm::Run const&, edm::EventSetup const&) {
     out_File->cd();
     out_Tree->Write();
     out_File->Close();
-
 }
 
 
@@ -342,6 +399,27 @@ void ExtractCPEInfo::endRun(edm::Run const&, edm::EventSetup const&) {
 void ExtractCPEInfo::analyze(const edm::Event& event, const edm::EventSetup& setup) {
     edm::ESHandle<TrackerTopology> tTopoHandle = setup.getHandle(TrackerTopoToken);
     auto const& tkTpl = *tTopoHandle;
+
+    edm::ESHandle<PixelClusterParameterEstimator> genericCPEHandle;
+    edm::ESHandle<PixelClusterParameterEstimator> templateCPEHandle;
+    const PixelClusterParameterEstimator* genericCPE = nullptr;
+    const PixelClusterParameterEstimator* templateCPE = nullptr;
+    if (useGenericCPE_) {
+        genericCPEHandle = setup.getHandle(GenericCPEToken);
+        if (!genericCPEHandle.isValid()) {
+            cout << "generic PixelClusterParameterEstimator is not valid" << endl;
+            return;
+        }
+        genericCPE = genericCPEHandle.product();
+    }
+    if (useTemplateCPE_) {
+        templateCPEHandle = setup.getHandle(TemplateCPEToken);
+        if (!templateCPEHandle.isValid()) {
+            cout << "template PixelClusterParameterEstimator is not valid" << endl;
+            return;
+        }
+        templateCPE = templateCPEHandle.product();
+    }
 
     //get the map
     edm::Handle<reco::TrackCollection> tracks;
@@ -632,11 +710,22 @@ void ExtractCPEInfo::analyze(const edm::Event& event, const edm::EventSetup& set
                 Cluster_y[j] = Cluster_yRaw[j]/cluster_max;
             }
 
-            // get the generic position
-            Generic_x = pixhit->localPosition().x();
-            Generic_xError = TMath::Sqrt(pixhit->localPositionError().xx());
-            Generic_y = pixhit->localPosition().y();
-            Generic_yError = TMath::Sqrt(pixhit->localPositionError().yy());
+            if (genericCPE != nullptr) {
+                auto const genericParams = genericCPE->getParameters(*clustp, *geomdetunit, ltp);
+                Generic_x = std::get<0>(genericParams).x();
+                Generic_y = std::get<0>(genericParams).y();
+                Generic_xError = std::sqrt(std::max(0.f, std::get<1>(genericParams).xx()));
+                Generic_yError = std::sqrt(std::max(0.f, std::get<1>(genericParams).yy()));
+            }
+
+            if (templateCPE != nullptr) {
+                auto const templateParams = templateCPE->getParameters(*clustp, *geomdetunit, ltp);
+                Template_x = std::get<0>(templateParams).x();
+                Template_y = std::get<0>(templateParams).y();
+                Template_xError = std::sqrt(std::max(0.f, std::get<1>(templateParams).xx()));
+                Template_yError = std::sqrt(std::max(0.f, std::get<1>(templateParams).yy()));
+            }
+
             //get sim hits
 
             std::vector<PSimHit> vec_simhits_assoc;
@@ -659,8 +748,14 @@ void ExtractCPEInfo::analyze(const edm::Event& event, const edm::EventSetup& set
             for(int i = 0;i<nSimHit;i++){
                 Generic_dx[i] = Generic_x - SimHit_x[i];
                 Generic_dy[i] = Generic_y - SimHit_y[i];
-                Generic_dxPull[i] = Generic_dx[i]/Generic_xError;
-                Generic_dyPull[i] = Generic_dy[i]/Generic_yError;
+                Generic_dxPull[i] = Generic_dx[i]/std::max(Generic_xError, 1.0e-12f);
+                Generic_dyPull[i] = Generic_dy[i]/std::max(Generic_yError, 1.0e-12f);
+                if (templateCPE != nullptr) {
+                    Template_dx[i] = Template_x - SimHit_x[i];
+                    Template_dy[i] = Template_y - SimHit_y[i];
+                    Template_dxPull[i] = Template_dx[i]/std::max(Template_xError, 1.0e-12f);
+                    Template_dyPull[i] = Template_dy[i]/std::max(Template_yError, 1.0e-12f);
+                }
             }
             count++;
             out_Tree->Fill();
